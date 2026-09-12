@@ -1,8 +1,8 @@
 # Omarchy Timer
 
 A countdown timer for the [Omarchy](https://omarchy.org) bar. When it ends, it can
-**stop whatever is playing** (music, YouTube, a movie) or ring an alarm that keeps
-going until you stop it.
+**stop whatever is playing** (music, YouTube, a movie), **stop playback and suspend
+the computer**, or ring an alarm that keeps going until you stop it.
 
 Good for falling asleep to a video, steeping tea, or a quick focus block.
 
@@ -13,6 +13,8 @@ Good for falling asleep to a video, steeping tea, or a quick focus block.
 - **Stop playback.** Pauses every playing media player at once: Chromium, Firefox,
   Spotify, mpv, and anything else that supports MPRIS. These are the same players
   your media keys control.
+- **Stop playback & suspend.** Pauses media, then puts the computer to sleep after a
+  15-second countdown you can cancel. Omarchy locks the screen on the way down.
 - **Alarm sounds.** Alarm clock, Bell, Ringtone, or Chime. The sound loops until you
   press Esc, click the notification, or click the timer icon.
 - **Notification only.** A silent notification and nothing else.
@@ -71,6 +73,7 @@ empty prompt reuses your last duration.
 | Option              | What happens                                                  |
 | ------------------- | ------------------------------------------------------------- |
 | Stop playback       | Pauses all playing media and shows a notification             |
+| Stop playback & suspend | Pauses all playing media, then suspends after a 15 s countdown |
 | Alarm clock         | Loops the alarm sound until stopped                           |
 | Bell                | Loops a bell until stopped                                    |
 | Ringtone            | Loops a phone ringtone until stopped                          |
@@ -81,25 +84,31 @@ When an alarm rings, a **Timer done** card appears on the focused monitor, the
 bar icon blinks, and a notification stays up until clicked. Any of these stops it:
 **Esc**, **Enter**, a click on the card, the notification, or the bar icon.
 
+With **Stop playback & suspend**, the card counts down "Suspending in 15 s" instead.
+The same actions cancel the suspend, so it never puts the computer to sleep while
+you're still using it. The option is hidden when suspend is turned off in Omarchy
+(`omarchy toggle suspend`). If the shell restarts during the countdown, the
+countdown picks up where it was instead of suspending right away.
+
 ### Keys in the popup
 
 | Key                     | Action                                          |
 | ----------------------- | ----------------------------------------------- |
 | `Enter`                 | Confirm                                         |
-| `Esc`                   | Go back or close (stops a ringing alarm)        |
+| `Esc`                   | Go back or close (stops an alarm or a suspend)  |
 | `↑` `↓` / `j` `k` / Tab | Move through the list                           |
-| `1`–`6`                 | Choose a row directly                           |
+| `1`–`7`                 | Choose a row directly                           |
 | `Space`                 | Preview the highlighted alarm sound             |
 | `Backspace`             | Edit the minutes / go back a step               |
 
 ### Mouse on the bar icon
 
-| Action       | Idle                        | Running / paused        | Ringing    |
-| ------------ | --------------------------- | ----------------------- | ---------- |
-| Left click   | Set a timer                 | Manage the timer        | Stop alarm |
-| Right click  | Restart the last timer      | Pause / resume          | Stop alarm |
-| Middle click |                             | Cancel                  | Stop alarm |
-| Scroll       |                             | Add / remove one minute |            |
+| Action       | Idle                   | Running / paused        | Ringing / suspending |
+| ------------ | ---------------------- | ----------------------- | -------------------- |
+| Left click   | Set a timer            | Manage the timer        | Stop / cancel        |
+| Right click  | Restart the last timer | Pause / resume          | Stop / cancel        |
+| Middle click |                        | Cancel                  | Stop / cancel        |
+| Scroll       |                        | Add / remove one minute |                      |
 
 ## Keybinding
 
@@ -122,12 +131,14 @@ omarchy-shell io.github.connilefleur.timer restart                  # repeat the
 omarchy-shell io.github.connilefleur.timer toggle                   # pause / resume
 omarchy-shell io.github.connilefleur.timer add 5                    # add 5 minutes
 omarchy-shell io.github.connilefleur.timer cancel
-omarchy-shell io.github.connilefleur.timer stop                     # stop a ringing alarm
+omarchy-shell io.github.connilefleur.timer stop                     # stop an alarm or cancel a suspend
+omarchy-shell io.github.connilefleur.timer suspendNow               # skip the suspend countdown
 omarchy-shell io.github.connilefleur.timer status                   # JSON
 omarchy-shell io.github.connilefleur.timer alarms                   # list alarm ids
 ```
 
-Alarm ids: `stop-playback`, `alarm-clock`, `bell`, `ringtone`, `chime`, `silent`.
+Alarm ids: `stop-playback`, `stop-and-suspend`, `alarm-clock`, `bell`, `ringtone`,
+`chime`, `silent`.
 
 ## Configure
 
@@ -153,11 +164,14 @@ omarchy bar move io.github.connilefleur.timer --section right
   down against the wall clock, so time spent in suspend still counts.
 - **Stop playback** calls `pause()` on every playing MPRIS player through
   Quickshell's MPRIS service. Players that don't support MPRIS are not affected.
+- **Suspend** runs `systemctl suspend`, the same command as Omarchy's
+  System > Suspend menu item. Omarchy's sleep hook locks the session first.
 - Sounds come from `/usr/share/sounds/freedesktop/stereo/` and play through `pw-play`.
 - Notifications go through `omarchy-notification-send`.
 - The timer state is saved in `~/.local/state/omarchy/timer.json`.
 
-The plugin makes no network requests and never needs `sudo`.
+The plugin makes no network requests and never needs `sudo`. Suspend goes through
+logind like any other session suspend.
 
 ## Update
 
@@ -178,7 +192,7 @@ rm -f ~/.local/state/omarchy/timer.json   # optional: forget the saved state
 manifest.json    Plugin manifest (schemaVersion 1)
 Service.qml      Timer state, alarms, media control, persistence, IPC
 BarWidget.qml    Bar icon and countdown
-Flow.qml         Set-timer prompt, manage list, and "Timer done" card
+Flow.qml         Set-timer prompt, manage list, and "Timer done" / suspend card
 TimerModel.js    Duration parsing, formatting, and the alarm list
 ```
 

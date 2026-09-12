@@ -11,8 +11,8 @@ import "TimerModel.js" as Model
 //   2. alarm    pick what happens at the end, Enter (Space previews a sound)
 //
 // With a timer already counting it opens on a small manage list instead, and
-// while an alarm rings it shows a "Timer done" card that Esc, Enter or any
-// click dismisses.
+// while an alarm rings or a suspend is pending it shows a "Timer done" card
+// that Esc, Enter or any click dismisses (stopping the alarm or the suspend).
 Item {
   id: root
 
@@ -20,7 +20,7 @@ Item {
   property var screen: null
 
   property bool opened: false
-  property string step: "minutes"   // "minutes" | "alarm" | "manage" | "ringing"
+  property string step: "minutes"   // "minutes" | "alarm" | "manage" | "alert"
   property string filterText: ""
   property string error: ""
   property int seconds: 0
@@ -44,13 +44,19 @@ Item {
     { id: "new", label: "New timer", hint: "Replaces this one", glyph: 0xF051B },
     { id: "cancel", label: "Cancel timer", hint: "", glyph: 0xF0156 }
   ]
-  readonly property var rows: step === "alarm" ? Model.ALARMS : (step === "manage" ? manageActions : [])
+  readonly property bool alerting: timer && (timer.status === "ringing" || timer.status === "suspending")
+  // Suspend options disappear when suspend is turned off in Omarchy.
+  readonly property var alarmOptions: Model.ALARMS.filter(function(a) {
+    return !a.suspend || (timer && timer.suspendAvailable)
+  })
+  readonly property var rows: step === "alarm" ? alarmOptions : (step === "manage" ? manageActions : [])
 
   readonly property string title: {
     if (!timer) return ""
     if (step === "alarm") return Model.formatDuration(seconds) + " · when it ends"
     if (step === "manage") return (paused ? "Paused · " : "") + Model.formatClock(timer.remainingMs) + " · " + timer.alarm.label
-    if (step === "ringing") return "Timer done · " + Model.formatDuration(timer.durationSec)
+    if (step === "alert" && timer.status === "suspending") return "Suspending in " + Math.ceil(timer.remainingMs / 1000) + " s"
+    if (step === "alert") return "Timer done · " + Model.formatDuration(timer.durationSec)
     return ""
   }
 
@@ -58,8 +64,9 @@ Item {
     if (!timer) return
     filterText = ""
     error = ""
-    if (timer.status === "ringing") {
-      step = "ringing"
+    timer.refreshSuspendAvailable()
+    if (alerting) {
+      step = "alert"
     } else if (timer.status === "running" || timer.status === "paused") {
       step = "manage"
       cursor = 0
@@ -80,11 +87,12 @@ Item {
     dismiss()
   }
 
-  // The alarm can also be stopped from the notification or the bar icon.
+  // The alarm can also be stopped from the notification or the bar icon, and
+  // a pending suspend ends by suspending.
   Connections {
     target: root.timer
     function onStatusChanged() {
-      if (root.opened && root.step === "ringing" && root.timer.status !== "ringing") root.dismiss()
+      if (root.opened && root.step === "alert" && !root.alerting) root.dismiss()
     }
   }
 
@@ -98,7 +106,9 @@ Item {
     seconds = parsed
     error = ""
     step = "alarm"
-    cursor = Model.alarmIndex(timer.lastAlarmId)
+    cursor = 0
+    for (var i = 0; i < alarmOptions.length; i++)
+      if (alarmOptions[i].id === timer.lastAlarmId) cursor = i
   }
 
   function activate(index) {
@@ -151,7 +161,7 @@ Item {
 
     MouseArea {
       anchors.fill: parent
-      onClicked: root.step === "ringing" ? root.stopAlarm() : root.dismiss()
+      onClicked: root.step === "alert" ? root.stopAlarm() : root.dismiss()
     }
 
     BorderSurface {
@@ -164,7 +174,7 @@ Item {
       borderSpec: root.borderSpec
       padding: root.contentMargin
 
-      MouseArea { anchors.fill: parent; onClicked: if (root.step === "ringing") root.stopAlarm() }
+      MouseArea { anchors.fill: parent; onClicked: if (root.step === "alert") root.stopAlarm() }
 
       Item {
         id: keyCatcher
@@ -176,7 +186,7 @@ Item {
           var key = event.key
           event.accepted = true
 
-          if (root.step === "ringing") {
+          if (root.step === "alert") {
             if (key === Qt.Key_Escape || key === Qt.Key_Return || key === Qt.Key_Enter || key === Qt.Key_Space) root.stopAlarm()
             else event.accepted = false
             return
@@ -240,10 +250,12 @@ Item {
         }
 
         Text {
-          visible: root.step === "ringing"
+          visible: root.step === "alert"
           width: parent.width
           textFormat: Text.PlainText
-          text: Model.glyph(0xF009E) + "  " + (root.timer ? root.timer.alarm.label : "") + " · Esc to stop"
+          text: root.timer && root.timer.status === "suspending"
+            ? Model.glyph(0xF04B2) + "  Playback stopped · Esc to cancel"
+            : Model.glyph(0xF009E) + "  " + (root.timer ? root.timer.alarm.label : "") + " · Esc to stop"
           color: root.foreground
           opacity: 0.58
           font.family: Style.font.family

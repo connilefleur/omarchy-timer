@@ -8,7 +8,8 @@ import "TimerModel.js" as Model
 // Timer icon for the bar, styled like the indicator icons next to the clock.
 // Idle it hides the same way inactive indicators do, peeking in dimmed while
 // the center of the bar is hovered; while counting it shows the remaining
-// time; when an alarm rings it blinks in the urgent color until clicked.
+// time; when an alarm rings (or a suspend is about to happen) it blinks in the
+// urgent color until clicked.
 //
 //   left click    set a timer (or manage the running one)
 //   right click   pause / resume, or restart the last timer when idle
@@ -22,9 +23,12 @@ BarWidget {
   readonly property string status: timer ? timer.status : "idle"
   readonly property bool counting: status === "running" || status === "paused"
   readonly property bool ringing: status === "ringing"
-  readonly property bool showTime: counting && !vertical
-  readonly property string timeText: counting ? Model.formatClock(timer.remainingMs) : ""
-  readonly property color iconColor: ringing && bar ? bar.urgent : button.foreground
+  readonly property bool suspending: status === "suspending"
+  // Ringing or about to suspend: any click stops it.
+  readonly property bool alerting: ringing || suspending
+  readonly property bool showTime: (counting || suspending) && !vertical
+  readonly property string timeText: counting || suspending ? Model.formatClock(timer.remainingMs) : ""
+  readonly property color iconColor: alerting && bar ? bar.urgent : button.foreground
   // Same reveal rule as omarchy.indicators' inactive block.
   readonly property bool revealed: status !== "idle"
     || setting("alwaysShow", false) === true
@@ -34,6 +38,7 @@ BarWidget {
   readonly property string tooltip: {
     if (!timer) return "Timer"
     if (ringing) return "Timer done · click to stop the alarm"
+    if (suspending) return "Suspending in " + Math.ceil(timer.remainingMs / 1000) + " s · click to cancel"
     if (status === "paused") return "Paused · " + timeText + " left · " + timer.alarm.label
     if (status === "running")
       return timer.alarm.label + " at " + Qt.formatTime(new Date(timer.endAt), "HH:mm")
@@ -67,9 +72,10 @@ BarWidget {
   Connections {
     target: root.timer
     function onFlowRequested() { if (root.onFocusedMonitor()) root.openFlow() }
-    // A ringing alarm puts its "Timer done" card up on the focused monitor.
+    // A ringing alarm or pending suspend puts its "Timer done" card up on the
+    // focused monitor.
     function onStatusChanged() {
-      if (root.ringing && root.onFocusedMonitor()) root.openFlow()
+      if (root.alerting && root.onFocusedMonitor()) root.openFlow()
     }
   }
 
@@ -107,7 +113,7 @@ BarWidget {
 
     onPressed: function(b) {
       if (!root.timer) return
-      if (root.ringing) root.timer.stopAlarm()
+      if (root.alerting) root.timer.stopAlarm()
       else if (b === Qt.MiddleButton) root.timer.cancel()
       else if (b === Qt.RightButton) {
         if (root.counting) root.timer.togglePause()
@@ -131,13 +137,13 @@ BarWidget {
         anchors.centerIn: parent
         width: Style.bar.iconCanvas
         height: Style.bar.iconCanvas
-        text: Model.glyph(root.ringing ? 0xF009E : 0xF051B)
+        text: Model.glyph(root.suspending ? 0xF04B2 : root.ringing ? 0xF009E : 0xF051B)
         fontFamily: button.fontFamily
         fontSize: Style.font.caption
         color: root.iconColor
 
         SequentialAnimation on opacity {
-          running: root.ringing
+          running: root.alerting
           loops: Animation.Infinite
           alwaysRunToEnd: true
           NumberAnimation { to: 0.25; duration: 450; easing.type: Easing.InOutQuad }

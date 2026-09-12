@@ -8,7 +8,10 @@ import "TimerModel.js" as Model
 // what happens when it ends, IPC, and the state file that lets a running
 // timer survive a shell restart or plugin reload.
 //
-//   status: "idle" | "running" | "paused" | "ringing"
+//   status: "idle" | "running" | "paused" | "ringing" | "suspending"
+//
+// "suspending" is the grace period before a suspend alarm puts the machine
+// to sleep; stopAlarm() cancels it just like it silences a ringing alarm.
 Item {
   id: root
 
@@ -18,15 +21,19 @@ Item {
   property int durationSec: 0          // total, including time added while running
   property real endAt: 0               // epoch ms, while running
   property real pausedRemainingMs: 0   // while paused
+  property real suspendAt: 0           // epoch ms, while suspending
   property string alarmId: "stop-playback"
   property int lastDurationSec: 25 * 60
   property string lastAlarmId: "stop-playback"
   property real now: Date.now()
   property bool stateLoaded: false
+  // Mirrors Omarchy's "suspend-off" toggle (omarchy toggle suspend).
+  property bool suspendAvailable: true
 
   readonly property var alarm: Model.alarmById(alarmId)
   readonly property real remainingMs: status === "running" ? Math.max(0, endAt - now)
     : status === "paused" ? pausedRemainingMs
+    : status === "suspending" ? Math.max(0, suspendAt - now)
     : 0
   readonly property real progress: durationSec > 0 ? Math.min(1, remainingMs / (durationSec * 1000)) : 0
 
@@ -35,6 +42,7 @@ Item {
 
   readonly property string statePath: Quickshell.env("HOME") + "/.local/state/omarchy/timer.json"
   readonly property int missedGraceMs: 5 * 60 * 1000
+  readonly property int suspendGraceMs: 15 * 1000
 
   // ---- control
 
@@ -85,6 +93,7 @@ Item {
     status = "idle"
     endAt = 0
     pausedRemainingMs = 0
+    suspendAt = 0
     save()
     return true
   }
@@ -106,13 +115,17 @@ Item {
     return true
   }
 
-  // The alarm sound loops until this runs: from the bar icon, the ringing
-  // card (Esc), the notification, or IPC.
+  // The alarm sound loops (or the suspend grace period runs) until this runs:
+  // from the bar icon, the "Timer done" card (Esc), the notification, or IPC.
   function stopAlarm() {
-    if (status !== "ringing") return false
+    if (status !== "ringing" && status !== "suspending") return false
     cancel()
-    Quickshell.execDetached([omarchyPath + "/bin/omarchy-shell", "notifications", "dismiss", "Timer done"])
+    dismissNotification()
     return true
+  }
+
+  function dismissNotification() {
+    Quickshell.execDetached([omarchyPath + "/bin/omarchy-shell", "notifications", "dismiss", "Timer done"])
   }
 
   // ---- ending
@@ -129,7 +142,12 @@ Item {
         : "Nothing was playing"
     }
 
-    if (Model.soundPath(ended) !== "") {
+    if (ended.suspend && suspendAvailable) {
+      status = "suspending"
+      now = Date.now()
+      suspendAt = now + suspendGraceMs
+      notify("Timer done", detail + " · suspending in " + Math.round(suspendGraceMs / 1000) + " s, click to cancel", ended.glyph, true)
+    } else if (Model.soundPath(ended) !== "") {
       ring()
       notify("Timer done", label + " · click to stop the alarm", ended.glyph, true)
     } else {
@@ -138,6 +156,20 @@ Item {
     }
     endAt = 0
     save()
+  }
+
+  // Same command as Omarchy's System > Suspend; Omarchy locks the session
+  // on the way down.
+  function suspendNow() {
+    status = "idle"
+    suspendAt = 0
+    save()
+    dismissNotification()
+    Quickshell.execDetached(["systemctl", "suspend"])
+  }
+
+  function refreshSuspendAvailable() {
+    suspendToggleFile.reload()
   }
 
   function isProxyPlayer(player) {
@@ -203,6 +235,7 @@ Item {
       durationSec: durationSec,
       endAt: endAt,
       pausedRemainingMs: pausedRemainingMs,
+      suspendAt: suspendAt,
       alarmId: alarmId,
       lastDurationSec: lastDurationSec,
       lastAlarmId: lastAlarmId
@@ -227,6 +260,10 @@ Item {
       } else if (data.status === "paused" && Number(data.pausedRemainingMs) > 0) {
         pausedRemainingMs = Number(data.pausedRemainingMs)
         status = "paused"
+      } else if (data.status === "suspending" && Number(data.suspendAt) > now) {
+        // Resume the grace period, but never suspend straight after a restart.
+        suspendAt = Number(data.suspendAt)
+        status = "suspending"
       } else if (data.status === "ringing" && Model.soundPath(alarm) !== "") {
         // Still unacknowledged when the shell went away: keep ringing.
         ring()
@@ -234,6 +271,14 @@ Item {
     }
     stateLoaded = true
     if (status === "running" && endAt <= now) finish()
+  }
+
+  FileView {
+    id: suspendToggleFile
+    path: Quickshell.env("HOME") + "/.local/state/omarchy/toggles/suspend-off"
+    printErrors: false
+    onLoaded: root.suspendAvailable = false
+    onLoadFailed: root.suspendAvailable = true
   }
 
   FileView {
@@ -250,11 +295,12 @@ Item {
   Timer {
     interval: 250
     repeat: true
-    running: root.status === "running"
+    running: root.status === "running" || root.status === "suspending"
     triggeredOnStart: true
     onTriggered: {
       root.now = Date.now()
-      if (root.endAt > 0 && root.now >= root.endAt) root.finish()
+      if (root.status === "running" && root.endAt > 0 && root.now >= root.endAt) root.finish()
+      else if (root.status === "suspending" && root.now >= root.suspendAt) root.suspendNow()
     }
   }
 
@@ -302,6 +348,11 @@ Item {
     }
     function cancel(): string { return root.cancel() ? "ok" : "unhandled" }
     function stop(): string { return root.stopAlarm() ? "ok" : "unhandled" }
+    function suspendNow(): string {
+      if (root.status !== "suspending") return "unhandled"
+      root.suspendNow()
+      return "ok"
+    }
     function status(): string { return root.statusJson() }
     function alarms(): string {
       return Model.ALARMS.map(function(a) { return a.id }).join("\n")

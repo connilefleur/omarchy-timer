@@ -4,9 +4,11 @@
 var SOUND_DIR = "/usr/share/sounds/freedesktop/stereo/"
 
 // `sound` is a file in SOUND_DIR that loops until dismissed; `pauseMedia`
-// pauses every MPRIS player that is currently playing.
+// pauses every MPRIS player that is currently playing; `suspend` puts the
+// machine to sleep after a short, cancelable grace period.
 var ALARMS = [
   { id: "stop-playback", label: "Stop playback", hint: "Pause music & video", glyph: 0xF03E4, sound: "", pauseMedia: true },
+  { id: "stop-and-suspend", label: "Stop playback & suspend", hint: "Pause, then sleep after 15 s", glyph: 0xF04B2, sound: "", pauseMedia: true, suspend: true },
   { id: "alarm-clock", label: "Alarm clock", hint: "", glyph: 0xF0020, sound: "alarm-clock-elapsed.oga", pauseMedia: false },
   { id: "bell", label: "Bell", hint: "", glyph: 0xF009E, sound: "bell.oga", pauseMedia: false },
   { id: "ringtone", label: "Ringtone", hint: "", glyph: 0xF03F2, sound: "phone-incoming-call.oga", pauseMedia: false },

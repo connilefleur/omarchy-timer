@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.connilefleur.timer",
   "name": "Timer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "connilefleur",
   "license": "MIT",
-  "description": "Countdown timer for the Omarchy bar that stops media playback or rings an alarm when it ends.",
+  "description": "Countdown timer for the Omarchy bar that stops media playback, suspends, or rings an alarm when it ends.",
   "kinds": [
     "service",
     "bar-widget"
