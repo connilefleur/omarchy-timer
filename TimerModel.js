@@ -34,11 +34,14 @@ function soundPath(alarm) {
   return alarm && alarm.sound ? SOUND_DIR + alarm.sound : ""
 }
 
-// Minutes are the unit: "25" and "1.5" are minutes. "1h30", "90s", "2m30s"
-// and "mm:ss" / "h:mm:ss" are accepted too. Returns seconds, or 0 if invalid.
+// Minutes are the unit: "25", "1.5", "0,5" and ".5" are minutes. "1h30",
+// "90s", "2m30s" and "mm:ss" / "h:mm:ss" are accepted too. Returns seconds,
+// or 0 if invalid.
 function parseDuration(value) {
-  var text = String(value || "").trim().toLowerCase().replace(/\s+/g, "")
+  var text = String(value || "").trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".")
   if (text === "") return 0
+  // ".5" -> "0.5", "1h.5" -> "1h0.5"
+  text = text.replace(/(^|[^\d])\./g, "$10.")
 
   if (/^\d+(\.\d+)?$/.test(text)) return Math.round(Number(text) * 60)
 

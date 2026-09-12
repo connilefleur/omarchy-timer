@@ -32,15 +32,13 @@ Good for falling asleep to a video, steeping tea, or a quick focus block.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/connilefleur/omarchy-timer.git --enable
+omarchy plugin add https://github.com/connilefleur/omarchy-timer.git
+omarchy plugin enable io.github.connilefleur.timer --after omarchy.indicators
 ```
 
-Omarchy asks which bar section to use. Pick **center**. To place the icon right
-next to the other indicators (reminder, night light, do not disturb), run:
-
-```bash
-omarchy bar move io.github.connilefleur.timer --after omarchy.indicators
-```
+This puts the icon in the center of the bar, right after the other indicators
+(reminder, night light, do not disturb). New plugins install disabled so you can
+read the code first, and the second command enables it in that spot.
 
 ## Usage
 
@@ -58,13 +56,15 @@ Minutes are the default unit, but other formats work too:
 | You type  | Timer        |
 | --------- | ------------ |
 | `25`      | 25 minutes   |
-| `1.5`     | 1 min 30 s   |
+| `0.5`     | 30 seconds   |
+| `1,5`     | 1 min 30 s   |
 | `1h30`    | 1 h 30 min   |
 | `90s`     | 90 seconds   |
 | `2m30s`   | 2 min 30 s   |
 | `10:00`   | 10 minutes   |
 
-Pressing **Enter** on an empty prompt reuses your last duration.
+Decimals work with a dot or a comma (`0.5`, `0,5`, `.5`). Pressing **Enter** on an
+empty prompt reuses your last duration.
 
 ### When the timer ends
 
