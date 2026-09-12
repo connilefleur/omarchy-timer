@@ -170,7 +170,7 @@ omarchy bar move io.github.connilefleur.timer --section right
 - Notifications go through `omarchy-notification-send`.
 - The timer state is saved in `~/.local/state/omarchy/timer.json`.
 
-The plugin makes no network requests and never needs `sudo`. Suspend goes through
+The plugin makes no network requests and needs no root privileges. Suspend goes through
 logind like any other session suspend.
 
 ## Update
