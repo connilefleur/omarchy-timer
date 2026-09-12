@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.connilefleur.timer",
+  "name": "Timer",
+  "version": "1.0.0",
+  "author": "connilefleur",
+  "license": "MIT",
+  "description": "Countdown timer for the Omarchy bar that stops media playback or rings an alarm when it ends.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Timer",
+    "description": "Countdown timer that stops media playback or rings an alarm.",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "alwaysShow": false
+    },
+    "schema": [
+      {
+        "key": "alwaysShow",
+        "type": "boolean",
+        "label": "Always Show",
+        "description": "Show the timer icon while idle without waiting for hover.",
+        "defaultValue": false
+      }
+    ]
+  }
+}
