@@ -39,7 +39,19 @@ function soundPath(alarm) {
 // Minutes are the unit: "25", "1.5", "0,5" and ".5" are minutes. "1h30",
 // "90s", "2m30s" and "mm:ss" / "h:mm:ss" are accepted too. Returns seconds,
 // or 0 if invalid.
+// Longest accepted input; anything a person types is far shorter.
+var MAX_DURATION_TEXT = 32
+// One week; also keeps the countdown's millisecond math far from float limits.
+var MAX_DURATION_SEC = 7 * 24 * 3600
+
 function parseDuration(value) {
+  var raw = String(value || "")
+  if (raw.length > MAX_DURATION_TEXT) return 0
+  var seconds = parseDurationText(raw)
+  return seconds > 0 && seconds <= MAX_DURATION_SEC ? seconds : 0
+}
+
+function parseDurationText(value) {
   var text = String(value || "").trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".")
   if (text === "") return 0
   // ".5" -> "0.5", "1h.5" -> "1h0.5"

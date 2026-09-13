@@ -22,8 +22,6 @@ Good for falling asleep to a video, steeping tea, or a quick focus block.
   sits with the other indicators next to the clock and stays hidden until a timer is
   running.
 - **Pause, resume, extend, cancel.** From the bar, the popup, or the command line.
-- **Survives restarts.** A running timer keeps going through a shell restart or a
-  plugin reload.
 
 ## Requirements
 
@@ -86,9 +84,10 @@ bar icon blinks, and a notification stays up until clicked. Any of these stops i
 
 With **Stop playback & suspend**, the card counts down "Suspending in 15 s" instead.
 The same actions cancel the suspend, so it never puts the computer to sleep while
-you're still using it. The option is hidden when suspend is turned off in Omarchy
-(`omarchy toggle suspend`). If the shell restarts during the countdown, the
-countdown picks up where it was instead of suspending right away.
+you're still using it.
+
+The timer lives in the shell's memory. Restarting the shell (`omarchy restart shell`,
+some Omarchy updates) or updating the plugin cancels a running timer.
 
 ### Keys in the popup
 
@@ -167,11 +166,17 @@ omarchy bar move io.github.connilefleur.timer --section right
 - **Suspend** runs `systemctl suspend`, the same command as Omarchy's
   System > Suspend menu item. Omarchy's sleep hook locks the session first.
 - Sounds come from `/usr/share/sounds/freedesktop/stereo/` and play through `pw-play`.
-- Notifications go through `omarchy-notification-send`.
-- The timer state is saved in `~/.local/state/omarchy/timer.json`.
+- Notifications are sent over D-Bus with `busctl`, the same call
+  `omarchy-notification-send` makes, and dismissed through the shell's
+  `notifications dismiss` IPC call.
 
-The plugin makes no network requests and needs no root privileges. Suspend goes through
-logind like any other session suspend.
+The plugin makes no network requests, needs no root privileges, and writes no files.
+Suspend goes through logind like any other session suspend.
+
+Every child process (`pw-play`, `systemctl`, `busctl`, `qs`) is started by absolute
+path with an empty environment, except `XDG_RUNTIME_DIR` where it is needed. Each has
+a hard deadline and an output cap and is killed when it exceeds either
+(`BoundedProcess.qml`).
 
 ## Update
 
@@ -183,17 +188,20 @@ omarchy plugin update io.github.connilefleur.timer
 
 ```bash
 omarchy plugin remove io.github.connilefleur.timer
-rm -f ~/.local/state/omarchy/timer.json   # optional: forget the saved state
 ```
+
+Versions before 1.2.0 saved their state in `~/.local/state/omarchy/timer.json`. You
+can delete that file.
 
 ## Files
 
 ```
-manifest.json    Plugin manifest (schemaVersion 1)
-Service.qml      Timer state, alarms, media control, persistence, IPC
-BarWidget.qml    Bar icon and countdown
-Flow.qml         Set-timer prompt, manage list, and "Timer done" / suspend card
-TimerModel.js    Duration parsing, formatting, and the alarm list
+manifest.json       Plugin manifest (schemaVersion 1)
+Service.qml         Timer state, alarms, media control, IPC
+BoundedProcess.qml  Child processes with a cleared environment, deadline, and output cap
+BarWidget.qml       Bar icon and countdown
+Flow.qml            Set-timer prompt, manage list, and "Timer done" / suspend card
+TimerModel.js       Duration parsing, formatting, and the alarm list
 ```
 
 ## License

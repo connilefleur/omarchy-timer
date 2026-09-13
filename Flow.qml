@@ -45,10 +45,7 @@ Item {
     { id: "cancel", label: "Cancel timer", hint: "", glyph: 0xF0156 }
   ]
   readonly property bool alerting: timer && (timer.status === "ringing" || timer.status === "suspending")
-  // Suspend options disappear when suspend is turned off in Omarchy.
-  readonly property var alarmOptions: Model.ALARMS.filter(function(a) {
-    return !a.suspend || (timer && timer.suspendAvailable)
-  })
+  readonly property var alarmOptions: Model.ALARMS
   readonly property var rows: step === "alarm" ? alarmOptions : (step === "manage" ? manageActions : [])
 
   readonly property string title: {
@@ -64,7 +61,6 @@ Item {
     if (!timer) return
     filterText = ""
     error = ""
-    timer.refreshSuspendAvailable()
     if (alerting) {
       step = "alert"
     } else if (timer.status === "running" || timer.status === "paused") {

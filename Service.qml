@@ -5,8 +5,8 @@ import Quickshell.Services.Mpris
 import "TimerModel.js" as Model
 
 // Single timer shared by every bar (one per monitor). Owns the countdown,
-// what happens when it ends, IPC, and the state file that lets a running
-// timer survive a shell restart or plugin reload.
+// what happens when it ends, and IPC. State lives in memory only: a shell
+// restart or plugin reload cancels a running timer.
 //
 //   status: "idle" | "running" | "paused" | "ringing" | "suspending"
 //
@@ -14,8 +14,6 @@ import "TimerModel.js" as Model
 // to sleep; stopAlarm() cancels it just like it silences a ringing alarm.
 Item {
   id: root
-
-  property string omarchyPath: Quickshell.env("OMARCHY_PATH")
 
   property string status: "idle"
   property int durationSec: 0          // total, including time added while running
@@ -26,9 +24,7 @@ Item {
   property int lastDurationSec: 25 * 60
   property string lastAlarmId: "stop-playback"
   property real now: Date.now()
-  property bool stateLoaded: false
-  // Mirrors Omarchy's "suspend-off" toggle (omarchy toggle suspend).
-  property bool suspendAvailable: true
+  property bool dismissPending: false
 
   readonly property var alarm: Model.alarmById(alarmId)
   readonly property real remainingMs: status === "running" ? Math.max(0, endAt - now)
@@ -40,9 +36,19 @@ Item {
   // Asks the bar on the focused monitor to show the set-timer flow.
   signal flowRequested()
 
-  readonly property string statePath: Quickshell.env("HOME") + "/.local/state/omarchy/timer.json"
-  readonly property int missedGraceMs: 5 * 60 * 1000
   readonly property int suspendGraceMs: 15 * 1000
+
+  // Child processes get fixed executables and only the variables listed here.
+  // pw-play, busctl and qs find the PipeWire socket, the session bus and the
+  // shell's IPC socket through XDG_RUNTIME_DIR; it is passed on only if it has
+  // the logind shape.
+  readonly property string runtimeDir: {
+    var dir = String(Quickshell.env("XDG_RUNTIME_DIR") || "")
+    return /^\/run\/user\/[0-9]+$/.test(dir) ? dir : ""
+  }
+  readonly property var sessionEnv: runtimeDir !== "" ? ({ XDG_RUNTIME_DIR: runtimeDir }) : ({})
+  readonly property var notifyBus: ["/usr/bin/busctl", "--user", "--", "call",
+    "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications"]
 
   // ---- control
 
@@ -58,7 +64,6 @@ Item {
     endAt = now + sec * 1000
     pausedRemainingMs = 0
     status = "running"
-    save()
     return true
   }
 
@@ -71,7 +76,6 @@ Item {
     now = Date.now()
     pausedRemainingMs = Math.max(0, endAt - now)
     status = "paused"
-    save()
     return true
   }
 
@@ -80,7 +84,6 @@ Item {
     now = Date.now()
     endAt = now + pausedRemainingMs
     status = "running"
-    save()
     return true
   }
 
@@ -94,7 +97,6 @@ Item {
     endAt = 0
     pausedRemainingMs = 0
     suspendAt = 0
-    save()
     return true
   }
 
@@ -111,7 +113,6 @@ Item {
       return false
     }
     durationSec = Math.max(1, durationSec + delta)
-    save()
     return true
   }
 
@@ -124,8 +125,21 @@ Item {
     return true
   }
 
+  // Omarchy's notification server keeps a toast up when its sender closes it,
+  // so this goes through the shell's own dismiss IPC. A toast still being sent
+  // is dismissed once it is up.
   function dismissNotification() {
-    Quickshell.execDetached([omarchyPath + "/bin/omarchy-shell", "notifications", "dismiss", "Timer done"])
+    if (notifier.busy) {
+      dismissPending = true
+      return
+    }
+    dismissPending = false
+    dismisser.launch(shellIpc(["notifications", "dismiss", "Timer done"]), sessionEnv)
+  }
+
+  // An IPC call into this shell process: qs talks to it directly, by pid.
+  function shellIpc(args) {
+    return ["/usr/bin/qs", "ipc", "--pid", String(Quickshell.processId), "call", "--"].concat(args)
   }
 
   // ---- ending
@@ -142,7 +156,7 @@ Item {
         : "Nothing was playing"
     }
 
-    if (ended.suspend && suspendAvailable) {
+    if (ended.suspend) {
       status = "suspending"
       now = Date.now()
       suspendAt = now + suspendGraceMs
@@ -155,7 +169,6 @@ Item {
       notify("Timer done", label + " · " + detail, ended.glyph, false)
     }
     endAt = 0
-    save()
   }
 
   // Same command as Omarchy's System > Suspend; Omarchy locks the session
@@ -163,13 +176,8 @@ Item {
   function suspendNow() {
     status = "idle"
     suspendAt = 0
-    save()
     dismissNotification()
-    Quickshell.execDetached(["systemctl", "suspend"])
-  }
-
-  function refreshSuspendAvailable() {
-    suspendToggleFile.reload()
+    power.launch(["/usr/bin/systemctl", "--no-ask-password", "suspend"], {})
   }
 
   function isProxyPlayer(player) {
@@ -197,97 +205,41 @@ Item {
     return count
   }
 
+  // Sound paths are fixed files under /usr/share/sounds (see TimerModel.js).
+  function playSound() {
+    sound.launch(["/usr/bin/pw-play", Model.soundPath(alarm)], sessionEnv)
+  }
+
   function ring() {
     status = "ringing"
-    soundProc.command = ["pw-play", Model.soundPath(alarm)]
-    soundProc.running = true
+    playSound()
   }
 
   function stopSound() {
     soundGap.stop()
-    if (soundProc.running) soundProc.running = false
+    sound.kill()
   }
 
   function preview(id) {
     var path = Model.soundPath(Model.alarmById(id))
     if (path === "" || status === "ringing") return
-    previewProc.running = false
-    previewProc.command = ["pw-play", path]
-    previewProc.running = true
+    previewSound.kill()
+    previewSound.launch(["/usr/bin/pw-play", path], sessionEnv)
   }
 
-  // A stoppable notification is critical, so it stays up until clicked.
+  // Calls org.freedesktop.Notifications.Notify directly, the way
+  // omarchy-notification-send does. A stoppable notification is critical, so
+  // it stays up until clicked; clicking runs the stop IPC call through qs.
   function notify(title, body, glyphCode, stoppable) {
-    var args = [omarchyPath + "/bin/omarchy-notification-send", "-g", Model.glyph(glyphCode)]
-    if (stoppable) args = args.concat(["-u", "critical"])
-    args = args.concat([title, body])
-    if (stoppable) args = args.concat(["--exec", omarchyPath + "/bin/omarchy-shell", "io.github.connilefleur.timer", "stop"])
-    Quickshell.execDetached(args)
-  }
-
-  // ---- persistence
-
-  function save() {
-    if (!stateLoaded) return
-    stateFile.setText(JSON.stringify({
-      version: 1,
-      status: status,
-      durationSec: durationSec,
-      endAt: endAt,
-      pausedRemainingMs: pausedRemainingMs,
-      suspendAt: suspendAt,
-      alarmId: alarmId,
-      lastDurationSec: lastDurationSec,
-      lastAlarmId: lastAlarmId
-    }, null, 2) + "\n")
-  }
-
-  function restore(text) {
-    var data = null
-    try { data = JSON.parse(text || "{}") } catch (e) { data = null }
-    if (data && data.version === 1) {
-      lastDurationSec = Number(data.lastDurationSec) > 0 ? Number(data.lastDurationSec) : lastDurationSec
-      lastAlarmId = Model.alarmById(data.lastAlarmId).id
-      alarmId = Model.alarmById(data.alarmId).id
-      durationSec = Number(data.durationSec) || 0
-      now = Date.now()
-
-      if (data.status === "running" && Number(data.endAt) > 0) {
-        endAt = Number(data.endAt)
-        status = "running"
-        // Ended while the shell was down: honor it if that was recent.
-        if (endAt <= now && now - endAt > missedGraceMs) status = "idle"
-      } else if (data.status === "paused" && Number(data.pausedRemainingMs) > 0) {
-        pausedRemainingMs = Number(data.pausedRemainingMs)
-        status = "paused"
-      } else if (data.status === "suspending" && Number(data.suspendAt) > now) {
-        // Resume the grace period, but never suspend straight after a restart.
-        suspendAt = Number(data.suspendAt)
-        status = "suspending"
-      } else if (data.status === "ringing" && Model.soundPath(alarm) !== "") {
-        // Still unacknowledged when the shell went away: keep ringing.
-        ring()
-      }
-    }
-    stateLoaded = true
-    if (status === "running" && endAt <= now) finish()
-  }
-
-  FileView {
-    id: suspendToggleFile
-    path: Quickshell.env("HOME") + "/.local/state/omarchy/toggles/suspend-off"
-    printErrors: false
-    onLoaded: root.suspendAvailable = false
-    onLoadFailed: root.suspendAvailable = true
-  }
-
-  FileView {
-    id: stateFile
-    path: root.statePath
-    atomicWrites: true
-    printErrors: false
-    onLoaded: if (!root.stateLoaded) root.restore(text())
-    onLoadFailed: if (!root.stateLoaded) root.restore("")
+    dismissPending = false
+    var hints = ["urgency", "y", stoppable ? "2" : "0", "omarchy-glyph", "s", Model.glyph(glyphCode)]
+    if (stoppable)
+      hints = hints.concat(["omarchy-exec-argv", "s", JSON.stringify(shellIpc(["io.github.connilefleur.timer", "stop"]))])
+    notifier.launch(notifyBus.concat([
+      "Notify", "susssasa{sv}i",
+      "omarchy-action", "0", "", title, body,
+      "0", String(hints.length / 3)
+    ]).concat(hints).concat(["-1"]), sessionEnv)
   }
 
   // ---- clocks
@@ -304,17 +256,42 @@ Item {
     }
   }
 
-  Process {
-    id: soundProc
-    onExited: if (root.status === "ringing") soundGap.restart()
+  // ---- child processes
+
+  // The longest sound runs about 6 s; the alarm loops by relaunching it.
+  BoundedProcess {
+    id: sound
+    deadlineMs: 15000
+    onCompleted: if (root.status === "ringing") soundGap.restart()
   }
 
-  Process { id: previewProc }
+  BoundedProcess {
+    id: previewSound
+    deadlineMs: 15000
+  }
 
   Timer {
     id: soundGap
     interval: 700
-    onTriggered: if (root.status === "ringing") soundProc.running = true
+    onTriggered: if (root.status === "ringing") root.playSound()
+  }
+
+  BoundedProcess {
+    id: power
+    deadlineMs: 30000
+  }
+
+  BoundedProcess {
+    id: notifier
+    deadlineMs: 5000
+    maxOutput: 256
+    onCompleted: if (root.dismissPending) root.dismissNotification()
+  }
+
+  BoundedProcess {
+    id: dismisser
+    deadlineMs: 5000
+    maxOutput: 256
   }
 
   // ---- IPC: omarchy-shell io.github.connilefleur.timer <method> [args]
