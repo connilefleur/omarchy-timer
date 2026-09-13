@@ -39,6 +39,12 @@ function soundPath(alarm) {
 // Minutes are the unit: "25", "1.5", "0,5" and ".5" are minutes. "1h30",
 // "90s", "2m30s" and "mm:ss" / "h:mm:ss" are accepted too. Returns seconds,
 // or 0 if invalid.
+// "ringing" and "suspending" put the "Timer done" card up and make the bar
+// icon blink.
+function isAlerting(status) {
+  return status === "ringing" || status === "suspending"
+}
+
 // Longest accepted input; anything a person types is far shorter.
 var MAX_DURATION_TEXT = 32
 // One week; also keeps the countdown's millisecond math far from float limits.
@@ -113,6 +119,7 @@ if (typeof module !== "undefined") {
     alarmById: alarmById,
     alarmIndex: alarmIndex,
     soundPath: soundPath,
+    isAlerting: isAlerting,
     parseDuration: parseDuration,
     formatClock: formatClock,
     formatDuration: formatDuration

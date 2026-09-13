@@ -75,7 +75,7 @@ BarWidget {
     // A ringing alarm or pending suspend puts its "Timer done" card up on the
     // focused monitor.
     function onStatusChanged() {
-      if (root.alerting && root.onFocusedMonitor()) root.openFlow()
+      if (Model.isAlerting(root.timer.status) && root.onFocusedMonitor()) root.openFlow()
     }
   }
 

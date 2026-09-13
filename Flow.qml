@@ -44,7 +44,7 @@ Item {
     { id: "new", label: "New timer", hint: "Replaces this one", glyph: 0xF051B },
     { id: "cancel", label: "Cancel timer", hint: "", glyph: 0xF0156 }
   ]
-  readonly property bool alerting: timer && (timer.status === "ringing" || timer.status === "suspending")
+  readonly property bool alerting: !!timer && Model.isAlerting(timer.status)
   readonly property var alarmOptions: Model.ALARMS
   readonly property var rows: step === "alarm" ? alarmOptions : (step === "manage" ? manageActions : [])
 
@@ -61,7 +61,7 @@ Item {
     if (!timer) return
     filterText = ""
     error = ""
-    if (alerting) {
+    if (Model.isAlerting(timer.status)) {
       step = "alert"
     } else if (timer.status === "running" || timer.status === "paused") {
       step = "manage"
@@ -84,11 +84,12 @@ Item {
   }
 
   // The alarm can also be stopped from the notification or the bar icon, and
-  // a pending suspend ends by suspending.
+  // a pending suspend ends by suspending. Reads status itself: the alerting
+  // binding may not have caught up yet when this handler runs.
   Connections {
     target: root.timer
     function onStatusChanged() {
-      if (root.opened && root.step === "alert" && !root.alerting) root.dismiss()
+      if (root.opened && root.step === "alert" && !Model.isAlerting(root.timer.status)) root.dismiss()
     }
   }
 
